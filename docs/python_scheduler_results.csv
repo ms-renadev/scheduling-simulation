@@ -1,0 +1,5 @@
+Scheduler,CompletionMs,AvgUIAudioResponseMs,P95UIAudioWakeLatencyMs,AvgTurnaroundMs,CPUUtilizationPct,ContextSwitchOverheadPct,JainBatchFairness,EnergyUnits,CompletedTasks
+Round Robin (Baseline),2246,15.01,29.0,190.7,78.46,18.09,0.9012,19604,250
+Linux (EEVDF),2585,1.06,3.0,244.5,69.54,28.62,0.6914,21319,250
+FreeBSD (ULE),2399,1.61,6.0,190.6,74.03,22.97,0.7240,20326,250
+Android (EAS + uclamp),3893,2.21,6.0,416.3,56.78,12.31,0.7636,16896,250

@@ -58,3 +58,8 @@ separate CSV copy to `scheduler_results.csv`.
 
 The simulation supports up to 40 tasks and 4 cores, as set in
 `include/scheduler_sim.h`.
+
+The beginner guide's charts use the separate 250-task Python benchmark at
+`~/Downloads/os_scheduler_sim.py`. Its verified output is recorded in
+`docs/python_scheduler_results.csv`; it is a separate model from this C++
+prototype and does not replace `scheduler_results.csv`.
