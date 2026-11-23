@@ -4,6 +4,11 @@ This project compares representative scheduling policies for Linux, FreeBSD,
 Android, and a Round Robin baseline. Every policy receives the exact same
 deterministic workload and the same heterogeneous four-core topology.
 
+The C++ code uses only the standard `iostream` library. Tasks, cores, queues,
+and results use fixed-size arrays; it does not depend on `vector`, `deque`,
+`string`, or other standard library headers. The workload uses a deterministic
+pseudo-random generator implemented in the project.
+
 ## Schedulers
 
 - Round Robin baseline
@@ -14,7 +19,7 @@ deterministic workload and the same heterogeneous four-core topology.
 ## Metrics
 
 The simulation records average and P95 response time, average turnaround,
-CPU utilization, context-switch overhead, Jain fairness, and an energy
+CPU utilization, context-switch event count, Jain fairness, and an energy
 estimate.
 
 The Android and FreeBSD implementations are educational approximations, not
@@ -28,4 +33,8 @@ make
 make run
 ```
 
-Results are written to `scheduler_results.csv`.
+Results are printed as CSV and saved to `scheduler_results.csv` by the Makefile
+using `tee`.
+
+The simulation supports up to 40 tasks and 4 cores, as set in
+`include/scheduler_sim.h`.

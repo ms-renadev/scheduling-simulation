@@ -1,123 +1,147 @@
 #include "scheduler_sim.h"
 
-#include <algorithm>
-#include <cmath>
-#include <deque>
-#include <memory>
-#include <vector>
-
 namespace {
 
-class RoundRobin : public Scheduler {
-    std::deque<Task*> ready;
-public:
-    std::string name() const override { return "Round Robin"; }
-    void enqueue(Task* task, int) override { ready.push_back(task); }
-    Task* pick_next(Core& core, int) override {
-        if (ready.empty()) return nullptr;
-        core.slice_left = 10;
-        Task* task = ready.front();
-        ready.pop_front();
-        return task;
+void push_back(Task* queue[], int& count, Task* task) {
+    if (count < MAX_TASKS) {
+        queue[count] = task;
+        ++count;
     }
-};
+}
 
-class LinuxEEVDF : public Scheduler {
-    std::vector<Task*> ready;
-public:
-    std::string name() const override { return "Linux EEVDF"; }
-    void enqueue(Task* task, int) override { ready.push_back(task); }
-    Task* pick_next(Core& core, int) override {
-        if (ready.empty()) return nullptr;
-        auto selected = std::min_element(ready.begin(), ready.end(),
-            [](const Task* a, const Task* b) {
-                return a->virtual_deadline < b->virtual_deadline;
-            });
-        Task* task = *selected;
-        ready.erase(selected);
-        core.slice_left = 6;
-        return task;
+Task* pop_front(Task* queue[], int& count) {
+    if (count == 0) {
+        return 0;
     }
-};
 
-class FreeBSDULE : public Scheduler {
-    std::deque<Task*> interactive;
-    std::deque<Task*> batch;
-public:
-    std::string name() const override { return "FreeBSD ULE"; }
-    void enqueue(Task* task, int) override {
-        if (task->foreground || task->interactivity >= 60)
-            interactive.push_back(task);
-        else
-            batch.push_back(task);
+    Task* task = queue[0];
+    for (int i = 1; i < count; ++i) {
+        queue[i - 1] = queue[i];
     }
-    Task* pick_next(Core& core, int) override {
-        if (!interactive.empty()) {
-            core.slice_left = 4;
-            Task* task = interactive.front();
-            interactive.pop_front();
-            return task;
-        }
-        if (!batch.empty()) {
-            core.slice_left = 10;
-            Task* task = batch.front();
-            batch.pop_front();
-            return task;
-        }
-        return nullptr;
-    }
-};
+    --count;
+    return task;
+}
 
-class AndroidEAS : public Scheduler {
-    std::deque<Task*> performance;
-    std::deque<Task*> efficiency;
-public:
-    std::string name() const override { return "Android EAS + uclamp"; }
-    void enqueue(Task* task, int) override {
-        if (task->foreground || task->priority <= 4)
-            performance.push_back(task);
-        else
-            efficiency.push_back(task);
+Task* remove_at(Task* queue[], int& count, int index) {
+    if (index < 0 || index >= count) {
+        return 0;
     }
-    Task* pick_next(Core& core, int) override {
-        if (core.type == "P") {
-            if (!performance.empty()) {
-                core.slice_left = 5;
-                Task* task = performance.front();
-                performance.pop_front();
-                return task;
-            }
-            if (!efficiency.empty()) {
-                core.slice_left = 8;
-                Task* task = efficiency.front();
-                efficiency.pop_front();
-                return task;
-            }
-        } else {
-            if (!efficiency.empty()) {
-                core.slice_left = 10;
-                Task* task = efficiency.front();
-                efficiency.pop_front();
-                return task;
-            }
-            if (!performance.empty()) {
-                core.slice_left = 5;
-                Task* task = performance.front();
-                performance.pop_front();
-                return task;
-            }
-        }
-        return nullptr;
+
+    Task* task = queue[index];
+    for (int i = index + 1; i < count; ++i) {
+        queue[i - 1] = queue[i];
     }
-};
+    --count;
+    return task;
+}
 
 } // namespace
 
-std::vector<std::unique_ptr<Scheduler>> create_schedulers() {
-    std::vector<std::unique_ptr<Scheduler>> schedulers;
-    schedulers.push_back(std::make_unique<RoundRobin>());
-    schedulers.push_back(std::make_unique<LinuxEEVDF>());
-    schedulers.push_back(std::make_unique<FreeBSDULE>());
-    schedulers.push_back(std::make_unique<AndroidEAS>());
-    return schedulers;
+RoundRobinScheduler::RoundRobinScheduler() : count(0) {}
+
+const char* RoundRobinScheduler::name() const {
+    return "Round Robin";
+}
+
+void RoundRobinScheduler::enqueue(Task* task, int) {
+    push_back(ready, count, task);
+}
+
+Task* RoundRobinScheduler::pick_next(Core& core, int) {
+    if (count == 0) {
+        return 0;
+    }
+    core.slice_left = 10;
+    return pop_front(ready, count);
+}
+
+LinuxEEVDFScheduler::LinuxEEVDFScheduler() : count(0) {}
+
+const char* LinuxEEVDFScheduler::name() const {
+    return "Linux EEVDF";
+}
+
+void LinuxEEVDFScheduler::enqueue(Task* task, int) {
+    push_back(ready, count, task);
+}
+
+Task* LinuxEEVDFScheduler::pick_next(Core& core, int) {
+    if (count == 0) {
+        return 0;
+    }
+
+    int best_index = 0;
+    for (int i = 1; i < count; ++i) {
+        if (ready[i]->virtual_deadline < ready[best_index]->virtual_deadline) {
+            best_index = i;
+        }
+    }
+
+    core.slice_left = 6;
+    return remove_at(ready, count, best_index);
+}
+
+FreeBSDULEScheduler::FreeBSDULEScheduler()
+    : interactive_count(0), batch_count(0) {}
+
+const char* FreeBSDULEScheduler::name() const {
+    return "FreeBSD ULE";
+}
+
+void FreeBSDULEScheduler::enqueue(Task* task, int) {
+    if (task->foreground || task->interactivity >= 60) {
+        push_back(interactive, interactive_count, task);
+    } else {
+        push_back(batch, batch_count, task);
+    }
+}
+
+Task* FreeBSDULEScheduler::pick_next(Core& core, int) {
+    if (interactive_count > 0) {
+        core.slice_left = 4;
+        return pop_front(interactive, interactive_count);
+    }
+    if (batch_count > 0) {
+        core.slice_left = 10;
+        return pop_front(batch, batch_count);
+    }
+    return 0;
+}
+
+AndroidEASScheduler::AndroidEASScheduler()
+    : performance_count(0), efficiency_count(0) {}
+
+const char* AndroidEASScheduler::name() const {
+    return "Android EAS + uclamp";
+}
+
+void AndroidEASScheduler::enqueue(Task* task, int) {
+    if (task->foreground || task->priority <= 4) {
+        push_back(performance, performance_count, task);
+    } else {
+        push_back(efficiency, efficiency_count, task);
+    }
+}
+
+Task* AndroidEASScheduler::pick_next(Core& core, int) {
+    if (core.type == 'P') {
+        if (performance_count > 0) {
+            core.slice_left = 5;
+            return pop_front(performance, performance_count);
+        }
+        if (efficiency_count > 0) {
+            core.slice_left = 8;
+            return pop_front(efficiency, efficiency_count);
+        }
+    } else {
+        if (efficiency_count > 0) {
+            core.slice_left = 10;
+            return pop_front(efficiency, efficiency_count);
+        }
+        if (performance_count > 0) {
+            core.slice_left = 5;
+            return pop_front(performance, performance_count);
+        }
+    }
+    return 0;
 }
