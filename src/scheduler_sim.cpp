@@ -1,4 +1,4 @@
-#include "scheduler_sim.h"
+#include "include/scheduler_sim.h"
 #include <iostream>
 
 namespace {
@@ -181,12 +181,12 @@ Metrics run_simulation(Scheduler& scheduler,
 }
 
 void print_csv_header() {
-    std::cout << "Scheduler,TotalTime,AvgResponse,P95Latency,AvgTurnaround,"
+    std::cerr << "Scheduler,TotalTime,AvgResponse,P95Latency,AvgTurnaround,"
                  "CPUUtil,CSOverhead,JainFairness,Energy\n";
 }
 
 void print_csv_row(const Metrics& metrics) {
-    std::cout << metrics.scheduler << ','
+    std::cerr << metrics.scheduler << ','
               << metrics.total_ticks << ','
               << metrics.average_response << ','
               << metrics.p95_response << ','
@@ -195,4 +195,106 @@ void print_csv_row(const Metrics& metrics) {
               << metrics.context_switches << ','
               << metrics.jain_fairness << ','
               << metrics.energy << '\n';
+}
+
+namespace {
+
+void print_border() {
+    const int widths[] = {22, 5, 9, 11, 10, 6, 8, 5, 8};
+    for (int i = 0; i < 9; ++i) {
+        std::cout << '+';
+        for (int j = 0; j < widths[i] + 2; ++j) {
+            std::cout << '-';
+        }
+    }
+    std::cout << "+\n";
+}
+
+void print_text_cell(const char* text, int width) {
+    int length = 0;
+    while (text[length] != '\0') {
+        ++length;
+    }
+    std::cout << "| " << text;
+    for (int i = length; i < width; ++i) {
+        std::cout << ' ';
+    }
+    std::cout << ' ';
+}
+
+void print_integer_cell(int value, int width) {
+    int divisor = 1;
+    int digits = value <= 0 ? 1 : 0;
+    int positive = value < 0 ? -value : value;
+    while (positive >= divisor && divisor <= 100000000) {
+        ++digits;
+        divisor *= 10;
+    }
+    std::cout << "| ";
+    for (int i = digits; i < width; ++i) {
+        std::cout << ' ';
+    }
+    std::cout << value << ' ';
+}
+
+void print_decimal_cell(double value, int width, int decimal_places) {
+    int scale = 1;
+    for (int i = 0; i < decimal_places; ++i) {
+        scale *= 10;
+    }
+    long long rounded = static_cast<long long>(value * scale + 0.5);
+    int whole = static_cast<int>(rounded / scale);
+    int fraction = static_cast<int>(rounded % scale);
+
+    int whole_digits = 1;
+    for (int remaining = whole; remaining >= 10; remaining /= 10) {
+        ++whole_digits;
+    }
+    int digits = whole_digits + (decimal_places > 0 ? decimal_places + 1 : 0);
+    std::cout << "| ";
+    for (int i = digits; i < width; ++i) {
+        std::cout << ' ';
+    }
+
+    std::cout << whole;
+    if (decimal_places > 0) {
+        std::cout << '.';
+        int fraction_divisor = scale / 10;
+        for (int i = 0; i < decimal_places; ++i) {
+            std::cout << (fraction / fraction_divisor) % 10;
+            fraction_divisor /= 10;
+        }
+    }
+    std::cout << ' ';
+}
+
+} // namespace
+
+void print_table_header() {
+    print_border();
+    print_text_cell("Scheduler", 22);
+    print_text_cell("Total", 5);
+    print_text_cell("Avg Resp", 9);
+    print_text_cell("P95 Latency", 11);
+    print_text_cell("Avg Turn", 10);
+    print_text_cell("CPU %", 6);
+    print_text_cell("Switches", 8);
+    print_text_cell("Jain", 5);
+    print_text_cell("Energy", 8);
+    std::cout << "|\n";
+    print_border();
+}
+
+void print_table_row(const Metrics& metrics) {
+    print_text_cell(metrics.scheduler, 22);
+    print_integer_cell(metrics.total_ticks, 5);
+    print_decimal_cell(metrics.average_response, 9, 2);
+    print_decimal_cell(metrics.p95_response, 11, 2);
+    print_decimal_cell(metrics.average_turnaround, 10, 2);
+    print_decimal_cell(metrics.cpu_utilization, 6, 2);
+    print_integer_cell(metrics.context_switches, 8);
+    print_decimal_cell(metrics.jain_fairness, 5, 3);
+    print_decimal_cell(metrics.energy, 8, 2);
+    std::cout << "|\n";
+    print_border();
 }

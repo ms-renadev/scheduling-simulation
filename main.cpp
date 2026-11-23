@@ -24,12 +24,14 @@ int main() {
         &android_eas
     };
 
+    print_table_header();
     print_csv_header();
     for (int i = 0; i < SCHEDULER_COUNT; ++i) {
         Task tasks[MAX_TASKS];
         make_workload(seed, tasks, task_count);
         Metrics result = run_simulation(
             *schedulers[i], tasks, task_count, cores, core_count, horizon);
+        print_table_row(result);
         print_csv_row(result);
     }
     return 0;

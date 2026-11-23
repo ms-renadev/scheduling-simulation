@@ -12,7 +12,7 @@ $(TARGET): $(SOURCES) include/scheduler_sim.h
 	$(CXX) $(CXXFLAGS) $(SOURCES) -o $(TARGET)
 
 run: $(TARGET)
-	./$(TARGET) | tee scheduler_results.csv
+	./$(TARGET) 2> scheduler_results.csv
 
 clean:
 	rm -f $(TARGET)

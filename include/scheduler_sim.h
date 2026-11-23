@@ -100,6 +100,8 @@ Metrics run_simulation(Scheduler& scheduler,
                        const Core core_template[],
                        int core_count,
                        int horizon);
+void print_table_header();
+void print_table_row(const Metrics& metrics);
 void print_csv_header();
 void print_csv_row(const Metrics& metrics);
 

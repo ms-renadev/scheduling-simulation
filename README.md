@@ -33,8 +33,8 @@ make
 make run
 ```
 
-Results are printed as CSV and saved to `scheduler_results.csv` by the Makefile
-using `tee`.
+Results are printed as a readable table in the terminal. The Makefile saves a
+separate CSV copy to `scheduler_results.csv`.
 
 The simulation supports up to 40 tasks and 4 cores, as set in
 `include/scheduler_sim.h`.
