@@ -35,6 +35,18 @@ Task* remove_at(Task* queue[], int& count, int index) {
     return task;
 }
 
+void remove_task(Task* tasks[], int& count, Task* task) {
+    for (int i = 0; i < count; ++i) {
+        if (tasks[i] == task) {
+            for (int j = i + 1; j < count; ++j) {
+                tasks[j - 1] = tasks[j];
+            }
+            --count;
+            return;
+        }
+    }
+}
+
 } // namespace
 
 RoundRobinScheduler::RoundRobinScheduler() : count(0) {}
@@ -55,13 +67,33 @@ Task* RoundRobinScheduler::pick_next(Core& core, int) {
     return pop_front(ready, count);
 }
 
-LinuxEEVDFScheduler::LinuxEEVDFScheduler() : count(0) {}
+void RoundRobinScheduler::account(Task*, double) {}
+
+void RoundRobinScheduler::task_finished(Task*) {}
+
+LinuxEEVDFScheduler::LinuxEEVDFScheduler()
+    : count(0), active_count(0), virtual_time(0.0) {}
 
 const char* LinuxEEVDFScheduler::name() const {
     return "Linux EEVDF";
 }
 
 void LinuxEEVDFScheduler::enqueue(Task* task, int) {
+    bool already_active = false;
+    for (int i = 0; i < active_count; ++i) {
+        if (active[i] == task) {
+            already_active = true;
+            break;
+        }
+    }
+    if (!already_active && active_count < MAX_TASKS) {
+        if (task->vruntime < virtual_time) {
+            task->vruntime = virtual_time;
+        }
+        active[active_count++] = task;
+    }
+    task->virtual_deadline =
+        task->vruntime + 6.0 * 1024.0 / task_weight(*task);
     push_back(ready, count, task);
 }
 
@@ -70,15 +102,39 @@ Task* LinuxEEVDFScheduler::pick_next(Core& core, int) {
         return 0;
     }
 
-    int best_index = 0;
-    for (int i = 1; i < count; ++i) {
-        if (ready[i]->virtual_deadline < ready[best_index]->virtual_deadline) {
-            best_index = i;
+    int eligible_index = -1;
+    int fallback_index = 0;
+    for (int i = 0; i < count; ++i) {
+        if (ready[i]->virtual_deadline < ready[fallback_index]->virtual_deadline) {
+            fallback_index = i;
+        }
+        if (ready[i]->vruntime <= virtual_time + 0.000001 &&
+            (eligible_index < 0 ||
+             ready[i]->virtual_deadline < ready[eligible_index]->virtual_deadline)) {
+            eligible_index = i;
         }
     }
 
     core.slice_left = 6;
-    return remove_at(ready, count, best_index);
+    return remove_at(ready, count,
+                     eligible_index >= 0 ? eligible_index : fallback_index);
+}
+
+void LinuxEEVDFScheduler::account(Task* task, double work_done) {
+    double weight_sum = 0.0;
+    for (int i = 0; i < active_count; ++i) {
+        weight_sum += task_weight(*active[i]);
+    }
+    if (weight_sum <= 0.0) {
+        return;
+    }
+
+    task->vruntime += work_done * 1024.0 / task_weight(*task);
+    virtual_time += work_done * 1024.0 / weight_sum;
+}
+
+void LinuxEEVDFScheduler::task_finished(Task* task) {
+    remove_task(active, active_count, task);
 }
 
 FreeBSDULEScheduler::FreeBSDULEScheduler()
@@ -108,6 +164,10 @@ Task* FreeBSDULEScheduler::pick_next(Core& core, int) {
     return 0;
 }
 
+void FreeBSDULEScheduler::account(Task*, double) {}
+
+void FreeBSDULEScheduler::task_finished(Task*) {}
+
 AndroidEASScheduler::AndroidEASScheduler()
     : performance_count(0), efficiency_count(0) {}
 
@@ -129,10 +189,6 @@ Task* AndroidEASScheduler::pick_next(Core& core, int) {
             core.slice_left = 5;
             return pop_front(performance, performance_count);
         }
-        if (efficiency_count > 0) {
-            core.slice_left = 8;
-            return pop_front(efficiency, efficiency_count);
-        }
     } else {
         if (efficiency_count > 0) {
             core.slice_left = 10;
@@ -145,3 +201,7 @@ Task* AndroidEASScheduler::pick_next(Core& core, int) {
     }
     return 0;
 }
+
+void AndroidEASScheduler::account(Task*, double) {}
+
+void AndroidEASScheduler::task_finished(Task*) {}

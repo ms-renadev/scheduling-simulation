@@ -1,4 +1,4 @@
-#include "include/scheduler_sim.h"
+#include "scheduler_sim.h"
 #include <iostream>
 
 namespace {
@@ -37,6 +37,10 @@ double response_percentile(int responses[], int count) {
 
 } // namespace
 
+double task_weight(const Task& task) {
+    return 1024.0 / priority_factor(task.priority);
+}
+
 void make_workload(unsigned int seed, Task tasks[], int task_count) {
     unsigned int state = seed;
     if (task_count > MAX_TASKS) {
@@ -47,12 +51,14 @@ void make_workload(unsigned int seed, Task tasks[], int task_count) {
         tasks[i].id = i;
         tasks[i].arrival = static_cast<int>(next_random(state) % 201u);
         tasks[i].burst = 10 + static_cast<int>(next_random(state) % 491u);
-        tasks[i].remaining = tasks[i].burst;
+        tasks[i].remaining = static_cast<double>(tasks[i].burst);
         tasks[i].priority = 1 + static_cast<int>(next_random(state) % 10u);
         tasks[i].interactivity = static_cast<int>(next_random(state) % 101u);
         tasks[i].foreground = i < 12 || tasks[i].interactivity >= 75;
         tasks[i].vruntime = 0.0;
         tasks[i].virtual_deadline = 0.0;
+        tasks[i].service_received = 0.0;
+        tasks[i].ideal_service = 0.0;
         tasks[i].start = -1;
         tasks[i].completion = -1;
     }
@@ -73,21 +79,56 @@ Metrics run_simulation(Scheduler& scheduler,
 
     Core cores[MAX_CORES];
     Task* running[MAX_CORES];
+    double core_speeds[MAX_CORES];
     for (int c = 0; c < core_count; ++c) {
         cores[c] = core_template[c];
         cores[c].busy_ticks = 0;
         cores[c].slice_left = 0;
         running[c] = 0;
+        core_speeds[c] = cores[c].speed;
+    }
+    for (int i = 1; i < core_count; ++i) {
+        double speed = core_speeds[i];
+        int j = i - 1;
+        while (j >= 0 && core_speeds[j] < speed) {
+            core_speeds[j + 1] = core_speeds[j];
+            --j;
+        }
+        core_speeds[j + 1] = speed;
     }
 
+    bool has_dispatched[MAX_CORES] = {};
     int context_switches = 0;
     for (int time = 0; time < horizon; ++time) {
         for (int i = 0; i < task_count; ++i) {
             Task& task = tasks[i];
             if (task.arrival == time) {
-                double factor = priority_factor(task.priority);
-                task.virtual_deadline = task.vruntime + 6.0 * factor;
                 scheduler.enqueue(&task, time);
+            }
+        }
+
+        int active_count = 0;
+        double active_weight = 0.0;
+        for (int i = 0; i < task_count; ++i) {
+            if (tasks[i].arrival <= time && tasks[i].completion < 0) {
+                ++active_count;
+                active_weight += task_weight(tasks[i]);
+            }
+        }
+        double ideal_capacity = 0.0;
+        int usable_core_count = active_count < core_count
+            ? active_count
+            : core_count;
+        for (int c = 0; c < usable_core_count; ++c) {
+            ideal_capacity += core_speeds[c];
+        }
+        if (active_weight > 0.0) {
+            for (int i = 0; i < task_count; ++i) {
+                Task& task = tasks[i];
+                if (task.arrival <= time && task.completion < 0) {
+                    task.ideal_service +=
+                        ideal_capacity * task_weight(task) / active_weight;
+                }
             }
         }
 
@@ -100,7 +141,10 @@ Metrics run_simulation(Scheduler& scheduler,
                     if (next->start == -1) {
                         next->start = time;
                     }
-                    ++context_switches;
+                    if (has_dispatched[c]) {
+                        ++context_switches;
+                    }
+                    has_dispatched[c] = true;
                 }
             }
 
@@ -109,24 +153,26 @@ Metrics run_simulation(Scheduler& scheduler,
                 continue;
             }
 
-            --task->remaining;
+            double work_done = task->remaining < core.speed
+                ? task->remaining
+                : core.speed;
+            task->remaining -= work_done;
+            task->service_received += work_done;
             ++core.busy_ticks;
-            task->vruntime += priority_factor(task->priority) / 1024.0;
+            scheduler.account(task, work_done);
 
-            if (task->remaining <= 0) {
+            if (task->remaining <= 0.000001) {
+                task->remaining = 0.0;
                 task->completion = time + 1;
+                scheduler.task_finished(task);
                 running[c] = 0;
-                ++context_switches;
                 continue;
             }
 
             --core.slice_left;
             if (core.slice_left <= 0) {
-                task->virtual_deadline =
-                    task->vruntime + 6.0 * priority_factor(task->priority);
                 scheduler.enqueue(task, time);
                 running[c] = 0;
-                ++context_switches;
             }
         }
     }
@@ -134,6 +180,7 @@ Metrics run_simulation(Scheduler& scheduler,
     int responses[MAX_TASKS];
     int response_count = 0;
     int completed = 0;
+    int last_completion = 0;
     double response_sum = 0.0;
     double turnaround_sum = 0.0;
     double fairness_sum = 0.0;
@@ -143,15 +190,20 @@ Metrics run_simulation(Scheduler& scheduler,
         const Task& task = tasks[i];
         if (task.completion >= 0) {
             ++completed;
+            if (task.completion > last_completion) {
+                last_completion = task.completion;
+            }
             int response = task.start - task.arrival;
             int turnaround = task.completion - task.arrival;
             responses[response_count++] = response;
             response_sum += response;
             turnaround_sum += turnaround;
 
-            double share = static_cast<double>(task.burst) / turnaround;
-            fairness_sum += share;
-            fairness_square_sum += share * share;
+            if (task.ideal_service > 0.0) {
+                double share = task.service_received / task.ideal_service;
+                fairness_sum += share;
+                fairness_square_sum += share * share;
+            }
         }
     }
 
@@ -159,30 +211,32 @@ Metrics run_simulation(Scheduler& scheduler,
     double energy = 0.0;
     for (int c = 0; c < core_count; ++c) {
         busy_ticks += cores[c].busy_ticks;
-        energy += cores[c].busy_ticks * (cores[c].type == 'P' ? 1.8 : 0.7);
+        energy += cores[c].busy_ticks * cores[c].energy_rate;
     }
 
     Metrics metrics;
     metrics.scheduler = scheduler.name();
-    metrics.total_ticks = busy_ticks > 0 ? horizon : 0;
+    metrics.total_ticks = completed == task_count ? last_completion : horizon;
     metrics.average_response = completed > 0 ? response_sum / completed : 0.0;
     metrics.p95_response = response_percentile(responses, response_count);
     metrics.average_turnaround =
         completed > 0 ? turnaround_sum / completed : 0.0;
-    metrics.cpu_utilization = core_count > 0 && horizon > 0
-        ? static_cast<double>(busy_ticks) / (horizon * core_count) * 100.0
+    metrics.cpu_utilization = core_count > 0 && metrics.total_ticks > 0
+        ? static_cast<double>(busy_ticks)
+          / (metrics.total_ticks * core_count) * 100.0
         : 0.0;
     metrics.context_switches = context_switches;
     metrics.jain_fairness = fairness_square_sum > 0.0
         ? fairness_sum * fairness_sum / (completed * fairness_square_sum)
         : 0.0;
     metrics.energy = energy;
+    metrics.completed_tasks = completed;
     return metrics;
 }
 
 void print_csv_header() {
-    std::cerr << "Scheduler,TotalTime,AvgResponse,P95Latency,AvgTurnaround,"
-                 "CPUUtil,CSOverhead,JainFairness,Energy\n";
+    std::cerr << "Scheduler,Makespan,AvgResponse,P95Latency,AvgTurnaround,"
+                 "CPUUtil,ContextSwitches,WeightedJain,Energy,Completed\n";
 }
 
 void print_csv_row(const Metrics& metrics) {
@@ -194,14 +248,15 @@ void print_csv_row(const Metrics& metrics) {
               << metrics.cpu_utilization << ','
               << metrics.context_switches << ','
               << metrics.jain_fairness << ','
-              << metrics.energy << '\n';
+              << metrics.energy << ','
+              << metrics.completed_tasks << '\n';
 }
 
 namespace {
 
 void print_border() {
-    const int widths[] = {22, 5, 9, 11, 10, 6, 8, 5, 8};
-    for (int i = 0; i < 9; ++i) {
+    const int widths[] = {22, 8, 9, 11, 10, 6, 8, 9, 8, 4};
+    for (int i = 0; i < 10; ++i) {
         std::cout << '+';
         for (int j = 0; j < widths[i] + 2; ++j) {
             std::cout << '-';
@@ -273,28 +328,30 @@ void print_decimal_cell(double value, int width, int decimal_places) {
 void print_table_header() {
     print_border();
     print_text_cell("Scheduler", 22);
-    print_text_cell("Total", 5);
+    print_text_cell("Makespan", 8);
     print_text_cell("Avg Resp", 9);
     print_text_cell("P95 Latency", 11);
     print_text_cell("Avg Turn", 10);
     print_text_cell("CPU %", 6);
     print_text_cell("Switches", 8);
-    print_text_cell("Jain", 5);
+    print_text_cell("Jain*", 9);
     print_text_cell("Energy", 8);
+    print_text_cell("Done", 4);
     std::cout << "|\n";
     print_border();
 }
 
 void print_table_row(const Metrics& metrics) {
     print_text_cell(metrics.scheduler, 22);
-    print_integer_cell(metrics.total_ticks, 5);
+    print_integer_cell(metrics.total_ticks, 8);
     print_decimal_cell(metrics.average_response, 9, 2);
     print_decimal_cell(metrics.p95_response, 11, 2);
     print_decimal_cell(metrics.average_turnaround, 10, 2);
     print_decimal_cell(metrics.cpu_utilization, 6, 2);
     print_integer_cell(metrics.context_switches, 8);
-    print_decimal_cell(metrics.jain_fairness, 5, 3);
+    print_decimal_cell(metrics.jain_fairness, 9, 3);
     print_decimal_cell(metrics.energy, 8, 2);
+    print_integer_cell(metrics.completed_tasks, 4);
     std::cout << "|\n";
     print_border();
 }

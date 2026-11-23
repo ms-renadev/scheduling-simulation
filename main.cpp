@@ -7,10 +7,10 @@ int main() {
     const int task_count = MAX_TASKS;
     const int core_count = MAX_CORES;
     const Core cores[MAX_CORES] = {
-        {'P', 1.8, 0, 0},
-        {'P', 1.8, 0, 0},
-        {'E', 0.7, 0, 0},
-        {'E', 0.7, 0, 0}
+        {'P', 1.8, 2.8, 0, 0},
+        {'P', 1.8, 2.8, 0, 0},
+        {'E', 0.7, 0.65, 0, 0},
+        {'E', 0.7, 0.65, 0, 0}
     };
 
     RoundRobinScheduler round_robin;
@@ -34,5 +34,8 @@ int main() {
         print_table_row(result);
         print_csv_row(result);
     }
+    std::cout << "\n* Jain compares actual work with estimated priority-weighted service.\n"
+                 "  Switches count dispatches after each core's first dispatch; "
+                 "switch time is not charged.\n";
     return 0;
 }

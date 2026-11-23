@@ -9,12 +9,14 @@ struct Task {
     int id = 0;
     int arrival = 0;
     int burst = 0;
-    int remaining = 0;
+    double remaining = 0.0;
     int priority = 0;
     int interactivity = 0;
     bool foreground = false;
     double vruntime = 0.0;
     double virtual_deadline = 0.0;
+    double service_received = 0.0;
+    double ideal_service = 0.0;
     int start = -1;
     int completion = -1;
 };
@@ -22,6 +24,7 @@ struct Task {
 struct Core {
     char type = 'E';
     double speed = 1.0;
+    double energy_rate = 0.0;
     int slice_left = 0;
     int busy_ticks = 0;
 };
@@ -36,13 +39,17 @@ struct Metrics {
     int context_switches = 0;
     double jain_fairness = 0.0;
     double energy = 0.0;
+    int completed_tasks = 0;
 };
 
 class Scheduler {
 public:
+    virtual ~Scheduler() {}
     virtual const char* name() const = 0;
     virtual void enqueue(Task* task, int time) = 0;
     virtual Task* pick_next(Core& core, int time) = 0;
+    virtual void account(Task* task, double work_done) = 0;
+    virtual void task_finished(Task* task) = 0;
 };
 
 class RoundRobinScheduler : public Scheduler {
@@ -54,17 +61,24 @@ public:
     const char* name() const override;
     void enqueue(Task* task, int time) override;
     Task* pick_next(Core& core, int time) override;
+    void account(Task* task, double work_done) override;
+    void task_finished(Task* task) override;
 };
 
 class LinuxEEVDFScheduler : public Scheduler {
     Task* ready[MAX_TASKS];
     int count;
+    Task* active[MAX_TASKS];
+    int active_count;
+    double virtual_time;
 
 public:
     LinuxEEVDFScheduler();
     const char* name() const override;
     void enqueue(Task* task, int time) override;
     Task* pick_next(Core& core, int time) override;
+    void account(Task* task, double work_done) override;
+    void task_finished(Task* task) override;
 };
 
 class FreeBSDULEScheduler : public Scheduler {
@@ -78,6 +92,8 @@ public:
     const char* name() const override;
     void enqueue(Task* task, int time) override;
     Task* pick_next(Core& core, int time) override;
+    void account(Task* task, double work_done) override;
+    void task_finished(Task* task) override;
 };
 
 class AndroidEASScheduler : public Scheduler {
@@ -91,9 +107,12 @@ public:
     const char* name() const override;
     void enqueue(Task* task, int time) override;
     Task* pick_next(Core& core, int time) override;
+    void account(Task* task, double work_done) override;
+    void task_finished(Task* task) override;
 };
 
 void make_workload(unsigned int seed, Task tasks[], int task_count);
+double task_weight(const Task& task);
 Metrics run_simulation(Scheduler& scheduler,
                        Task tasks[],
                        int task_count,
@@ -104,5 +123,6 @@ void print_table_header();
 void print_table_row(const Metrics& metrics);
 void print_csv_header();
 void print_csv_row(const Metrics& metrics);
+
 
 #endif
