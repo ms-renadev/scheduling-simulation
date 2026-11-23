@@ -59,7 +59,17 @@ separate CSV copy to `scheduler_results.csv`.
 The simulation supports up to 40 tasks and 4 cores, as set in
 `include/scheduler_sim.h`.
 
-The beginner guide's charts use the separate 250-task Python benchmark at
-`~/Downloads/os_scheduler_sim.py`. Its verified output is recorded in
-`docs/python_scheduler_results.csv`; it is a separate model from this C++
+## Python benchmark
+
+The separate Python benchmark is included at `os_scheduler_sim.py`. It uses
+only the Python standard library and models 250 app-like tasks, CPU and I/O
+bursts, P/E core speeds, context-switch cost, and energy. Run it from the
+project root with:
+
+```sh
+python3 os_scheduler_sim.py
+```
+
+Its results and the beginner guide's charts are recorded in
+`docs/python_scheduler_results.csv`. This is a separate model from the C++
 prototype and does not replace `scheduler_results.csv`.
